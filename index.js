@@ -682,7 +682,8 @@ async function handleSystemMessage(clientNumber, messageContent, instanceName) {
 }
 
 /**
- * PROCESSAR RESPOSTA DO CLIENTE
+ * PROCESSAR RESPOSTA DO CLIENTE - VERSÃO CORRIGIDA
+ * Aguarda confirmação do N8N antes de processar próxima resposta
  */
 async function handleClientResponse(clientNumber, messageContent, instanceName, messageData) {
     try {
@@ -693,6 +694,12 @@ async function handleClientResponse(clientNumber, messageContent, instanceName, 
         
         if (!conversation) {
             console.log(`⚠️ Cliente ${clientNumber} não encontrado nas conversas ativas`);
+            return;
+        }
+        
+        // NOVA VERIFICAÇÃO: Se está aguardando confirmação do N8N, ignorar
+        if (conversation.waitingConfirmation) {
+            console.log(`⏳ Cliente ${clientNumber} aguardando confirmação N8N - ignorando mensagem`);
             return;
         }
         
@@ -744,20 +751,13 @@ async function handleClientResponse(clientNumber, messageContent, instanceName, 
             }
         }
         
-        // Atualizar conversa
-        conversation.responseCount = nextStep;
+        // MARCAR COMO AGUARDANDO CONFIRMAÇÃO
+        conversation.waitingConfirmation = true;
+        conversation.pendingStep = nextStep;
         conversation.lastActivity = new Date();
         conversations.set(clientNumber, conversation);
         
-        // Atualizar banco (async)
-        try {
-            await database.query(
-                'UPDATE conversations SET responses_count = $1, last_response_at = NOW(), updated_at = NOW() WHERE order_code = $2',
-                [nextStep, conversation.orderCode]
-            );
-        } catch (dbError) {
-            console.warn(`⚠️ Erro no banco (resposta): ${dbError.message}`);
-        }
+        console.log(`⏳ Cliente ${clientNumber} marcado como aguardando confirmação N8N`);
         
         // Preparar dados para N8N
         const firstName = getFirstName(conversation.clientName);
@@ -791,12 +791,67 @@ async function handleClientResponse(clientNumber, messageContent, instanceName, 
         const success = await sendToN8N(eventData, `resposta_0${nextStep}`);
         
         if (success) {
-            console.log(`✅ Resposta_0${nextStep} enviada com sucesso`);
+            console.log(`✅ Resposta_0${nextStep} enviada para N8N - aguardando confirmação`);
+        } else {
+            console.error(`❌ Falha ao enviar resposta_0${nextStep} - liberando conversa`);
+            
+            // Se falhou, liberar a conversa para não travar
+            conversation.waitingConfirmation = false;
+            conversation.pendingStep = null;
+            conversations.set(clientNumber, conversation);
+        }
+        
+    } catch (error) {
+        console.error(`❌ Erro resposta cliente: ${error.message}`);
+    }
+}
+
+/**
+ * WEBHOOK N8N CONFIRM - VERSÃO CORRIGIDA
+ * Processa confirmação e libera para próxima resposta
+ */
+app.post('/webhook/n8n-confirm', async (req, res) => {
+    try {
+        const { tipo_mensagem, telefone, instancia, funil_completo } = req.body;
+        
+        const phoneNormalized = normalizePhoneNumber(telefone);
+        
+        console.log(`✅ N8N confirmou: ${tipo_mensagem} para ${phoneNormalized} via ${instancia}`);
+        
+        // Buscar conversa
+        const conversation = conversations.get(phoneNormalized);
+        
+        if (!conversation) {
+            console.warn(`⚠️ Conversa não encontrada para confirmação: ${phoneNormalized}`);
+            return res.json({ 
+                success: false, 
+                message: 'Conversa não encontrada'
+            });
+        }
+        
+        // Se está aguardando confirmação, processar
+        if (conversation.waitingConfirmation && conversation.pendingStep) {
+            const stepCompleted = conversation.pendingStep;
+            
+            // Atualizar responseCount
+            conversation.responseCount = stepCompleted;
+            conversation.waitingConfirmation = false;
+            conversation.pendingStep = null;
+            conversation.lastActivity = new Date();
+            
+            // Atualizar banco (async)
+            try {
+                await database.query(
+                    'UPDATE conversations SET responses_count = $1, last_response_at = NOW(), updated_at = NOW() WHERE order_code = $2',
+                    [stepCompleted, conversation.orderCode]
+                );
+            } catch (dbError) {
+                console.warn(`⚠️ Erro no banco (confirmação): ${dbError.message}`);
+            }
             
             // Se foi a terceira resposta, marcar como completo
-            if (nextStep === 3) {
+            if (stepCompleted === 3) {
                 conversation.status = 'completed';
-                conversations.set(clientNumber, conversation);
                 
                 try {
                     await database.query(
@@ -809,49 +864,29 @@ async function handleClientResponse(clientNumber, messageContent, instanceName, 
                 
                 console.log(`🎯 Funil completo: ${conversation.orderCode}`);
             }
-        } else {
-            console.error(`❌ Falha ao enviar resposta_0${nextStep}`);
-        }
-        
-    } catch (error) {
-        console.error(`❌ Erro resposta cliente: ${error.message}`);
-    }
-}
-
-/**
- * VERIFICAR STATUS DE PAGAMENTO
- */
-async function checkPaymentStatus(orderCode) {
-    try {
-        // Verificar na memória primeiro
-        for (const [phone, conv] of conversations) {
-            if (conv.orderCode === orderCode) {
-                return conv.status === 'approved' || conv.status === 'completed';
-            }
-        }
-        
-        // Verificar no banco
-        try {
-            const result = await database.query(
-                'SELECT status FROM conversations WHERE order_code = $1 ORDER BY updated_at DESC LIMIT 1',
-                [orderCode]
-            );
             
-            if (result.rows.length > 0) {
-                const status = result.rows[0].status;
-                return status === 'approved' || status === 'completed';
-            }
-        } catch (dbError) {
-            console.warn(`⚠️ Erro verificar pagamento: ${dbError.message}`);
+            conversations.set(phoneNormalized, conversation);
+            
+            console.log(`🔓 Cliente ${phoneNormalized} liberado - resposta_0${stepCompleted} confirmada`);
         }
         
-        return false;
+        console.log(`📝 Confirmação N8N registrada: ${conversation.orderCode}`);
+        
+        res.json({ 
+            success: true,
+            message: `${tipo_mensagem} confirmada`,
+            pedido: conversation.orderCode,
+            cliente: conversation.clientName,
+            respostas_atuais: conversation.responseCount,
+            status_conversa: conversation.status,
+            liberado_para_proxima: !conversation.waitingConfirmation
+        });
         
     } catch (error) {
-        console.error(`❌ Erro verificar pagamento: ${error.message}`);
-        return false;
+        console.error(`❌ Erro N8N confirm: ${error.message}`);
+        res.status(500).json({ success: false, error: error.message });
     }
-}
+});
 
 /**
  * ENVIAR EVENTO DE CONVERSÃO
