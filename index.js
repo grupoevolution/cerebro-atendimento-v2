@@ -111,6 +111,7 @@ function getBrazilTime(format = 'DD/MM/YYYY HH:mm:ss') {
 }
 
 // Normalizar telefone (versão corrigida)
+
 function normalizePhoneNumber(phone) {
     if (!phone) return phone;
     
@@ -132,6 +133,61 @@ function normalizePhoneNumber(phone) {
     }
     
     console.log(`✅ Normalizado: ${phone} → ${cleaned}`);
+    return cleaned;
+}
+Pela versão corrigida:
+javascript// Normalizar telefone (versão FINAL corrigida)
+function normalizePhoneNumber(phone) {
+    if (!phone) return phone;
+    
+    console.log(`📱 Normalizando: ${phone}`);
+    
+    let cleaned = String(phone).trim().replace(/\D/g, '');
+    
+    // Caso 1: Já tem 13 dígitos com 55 (Perfect Pay)
+    if (cleaned.length === 13 && cleaned.startsWith('55')) {
+        console.log(`✅ Normalizado: ${phone} → ${cleaned} (já completo)`);
+        return cleaned;
+    }
+    
+    // Caso 2: 12 dígitos SEM o 9 (Evolution API remove o 9)
+    if (cleaned.length === 12 && cleaned.startsWith('55')) {
+        const ddd = cleaned.substring(2, 4);  // Posições 2-3
+        const numero = cleaned.substring(4);   // A partir da posição 4
+        
+        // Se o primeiro dígito do número é 6,7,8,9 = celular
+        if (['6', '7', '8', '9'].includes(numero[0])) {
+            const numeroCompleto = '55' + ddd + '9' + numero;
+            console.log(`✅ Normalizado: ${phone} → ${numeroCompleto} (adicionado 9 do celular)`);
+            return numeroCompleto;
+        }
+    }
+    
+    // Caso 3: 11 dígitos (DDD + número), adicionar 55
+    if (cleaned.length === 11) {
+        cleaned = '55' + cleaned;
+        console.log(`✅ Normalizado: ${phone} → ${cleaned} (adicionado código país)`);
+        return cleaned;
+    }
+    
+    // Caso 4: 10 dígitos (DDD + número sem 9)
+    if (cleaned.length === 10) {
+        const ddd = cleaned.substring(0, 2);
+        const numero = cleaned.substring(2);
+        
+        // Se começa com 6,7,8,9 = celular, adicionar 9
+        if (['6', '7', '8', '9'].includes(numero[0])) {
+            cleaned = '55' + ddd + '9' + numero;
+        } else {
+            cleaned = '55' + cleaned;
+        }
+        
+        console.log(`✅ Normalizado: ${phone} → ${cleaned} (formato completo)`);
+        return cleaned;
+    }
+    
+    // Outros casos: retornar como está
+    console.log(`⚠️ Formato não reconhecido: ${phone} → ${cleaned}`);
     return cleaned;
 }
 
