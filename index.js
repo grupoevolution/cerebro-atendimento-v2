@@ -110,33 +110,7 @@ function getBrazilTime(format = 'DD/MM/YYYY HH:mm:ss') {
     return moment().tz('America/Bahia').format(format);
 }
 
-// Normalizar telefone (versão corrigida)
-
-function normalizePhoneNumber(phone) {
-    if (!phone) return phone;
-    
-    console.log(`📱 Normalizando: ${phone}`);
-    
-    let cleaned = String(phone).trim().replace(/\D/g, '');
-    
-    // Formato brasileiro padrão: 5511999999999 (13 dígitos)
-    if (cleaned.length === 14 && cleaned.startsWith('55')) {
-        const areaCode = cleaned.substring(2, 4);
-        const rest = cleaned.substring(4);
-        
-        // Remover 9 extra se necessário
-        if (rest.length === 10 && rest[0] === '9' && rest[1] !== '9') {
-            cleaned = '55' + areaCode + rest.substring(1);
-        }
-    } else if (cleaned.length === 11) {
-        cleaned = '55' + cleaned;
-    }
-    
-    console.log(`✅ Normalizado: ${phone} → ${cleaned}`);
-    return cleaned;
-}
-Pela versão corrigida:
-javascript// Normalizar telefone (versão FINAL corrigida)
+// Normalizar telefone (versão FINAL corrigida)
 function normalizePhoneNumber(phone) {
     if (!phone) return phone;
     
@@ -190,7 +164,6 @@ function normalizePhoneNumber(phone) {
     console.log(`⚠️ Formato não reconhecido: ${phone} → ${cleaned}`);
     return cleaned;
 }
-
 // Extrair primeiro nome
 function getFirstName(fullName) {
     return fullName ? fullName.split(' ')[0].trim() : 'Cliente';
