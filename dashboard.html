@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cérebro v2.0 - Sistema de Atendimento</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            background: rgba(255, 255, 255, 0.98);
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+        
+        .header h1 {
+            font-size: 2rem;
+            color: #333;
+            margin-bottom: 10px;
+        }
+        
+        .version {
+            background: linear-gradient(135deg, #48bb78, #38a169);
+            color: white;
+            padding: 5px 12px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            display: inline-block;
+            margin-left: 10px;
+        }
+        
+        .subtitle {
+            color: #666;
+            font-size: 1rem;
+            margin-bottom: 15px;
+        }
+        
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .info-item {
+            background: #f8f9fa;
+            padding: 12px;
+            border-radius: 8px;
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.9rem;
+        }
+        
+        .info-label {
+            color: #666;
+            font-weight: 600;
+        }
+        
+        .info-value {
+            color: #333;
+            font-family: monospace;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 15px;
+        }
+        
+        .btn {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.9rem;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-success {
+            background: linear-gradient(135deg, #48bb78, #38a169);
+        }
+        
+        .btn-warning {
+            background: linear-gradient(135deg, #ed8936, #dd6b20);
+        }
+        
+        .btn-danger {
+            background: linear-gradient(135deg, #f56565, #e53e3e);
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 25px;
+        }
+        
+        .stat-card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.08);
+            transition: transform 0.3s ease;
+            border-left: 4px solid transparent;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .stat-card.primary { border-left-color: #667eea; }
+        .stat-card.success { border-left-color: #48bb78; }
+        .stat-card.warning { border-left-color: #ed8936; }
+        .stat-card.info { border-left-color: #4299e1; }
+        
+        .stat-value {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 8px;
+        }
+        
+        .stat-label {
+            color: #666;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .content-panels {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 25px;
+        }
+        
+        .panel {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+        
+        .panel h3 {
+            color: #333;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #f1f3f4;
+        }
+        
+        .tab {
+            padding: 10px 20px;
+            background: none;
+            border: none;
+            color: #666;
+            font-weight: 600;
+            cursor: pointer;
+            position: relative;
+            transition: color 0.3s ease;
+        }
+        
+        .tab.active {
+            color: #667eea;
+        }
+        
+        .tab.active::after {
+            content: '';
+            position: absolute;
+            bottom: -2px;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+        }
+        
+        .table-container {
+            overflow-x: auto;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        th, td {
+            padding: 10px 12px;
+            text-align: left;
+            border-bottom: 1px solid #f1f3f4;
+            font-size: 0.9rem;
+        }
+        
+        th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #333;
+            position: sticky;
+            top: 0;
+        }
+        
+        tr:hover {
+            background: #f8f9fa;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .badge-success { background: #c6f6d5; color: #22543d; }
+        .badge-warning { background: #fbd38d; color: #975a16; }
+        .badge-info { background: #bee3f8; color: #2c5282; }
+        .badge-danger { background: #fed7d7; color: #742a2a; }
+        
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #666;
+        }
+        
+        .empty-state i {
+            font-size: 3rem;
+            margin-bottom: 15px;
+            opacity: 0.3;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+        
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .contacts-section {
+            margin-top: 20px;
+        }
+        
+        .contacts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .contact-instance {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+        }
+        
+        .contact-count {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #667eea;
+        }
+        
+        .contact-name {
+            font-size: 0.9rem;
+            color: #666;
+            margin-bottom: 10px;
+        }
+        
+        .alert {
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .alert-success { background: #c6f6d5; color: #22543d; }
+        .alert-warning { background: #fbd38d; color: #975a16; }
+        .alert-danger { background: #fed7d7; color: #742a2a; }
+        .alert-info { background: #bee3f8; color: #2c5282; }
+        
+        @media (max-width: 768px) {
+            body { padding: 10px; }
+            .content-panels { grid-template-columns: 1fr; }
+            .stats-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+            .info-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>
+                <i class="fas fa-brain"></i> 
+                Cérebro de Atendimento
+                <span class="version">v2.0</span>
+            </h1>
+            <div class="subtitle">Sistema Híbrido - Simples e Funcional</div>
+            
+            <div class="info-grid">
+                <div class="info-item">
+                    <span class="info-label">Horário:</span>
+                    <span class="info-value" id="current-time">--</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">N8N Webhook:</span>
+                    <span class="info-value" id="n8n-url">Carregando...</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Banco:</span>
+                    <span class="info-value" id="database-status">PostgreSQL</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Uptime:</span>
+                    <span class="info-value" id="uptime">--</span>
+                </div>
+            </div>
+            
+            <div class="controls">
+                <button class="btn" onclick="refreshData()">
+                    <i class="fas fa-sync-alt"></i> Atualizar
+                </button>
+                <button class="btn btn-success" onclick="exportAllContacts()">
+                    <i class="fas fa-download"></i> Exportar Contatos
+                </button>
+                <button class="btn btn-warning" onclick="openHealthCheck()">
+                    <i class="fas fa-heartbeat"></i> Health Check
+                </button>
+                <button class="btn btn-danger" onclick="testN8N()">
+                    <i class="fas fa-vial"></i> Testar N8N
+                </button>
+            </div>
+        </div>
+        
+        <!-- Stats Grid -->
+        <div class="stats-grid">
+            <div class="stat-card primary">
+                <div class="stat-value" id="active-conversations">0</div>
+                <div class="stat-label">Conversas Ativas</div>
+            </div>
+            <div class="stat-card warning">
+                <div class="stat-value" id="pending-pix">0</div>
+                <div class="stat-label">PIX Pendentes</div>
+            </div>
+            <div class="stat-card success">
+                <div class="stat-value" id="contacts-saved">0</div>
+                <div class="stat-label">Contatos Salvos</div>
+            </div>
+            <div class="stat-card info">
+                <div class="stat-value" id="success-rate">0%</div>
+                <div class="stat-label">Taxa de Sucesso</div>
+            </div>
+            <div class="stat-card success">
+                <div class="stat-value" id="converted-sales">0</div>
+                <div class="stat-label">Convertidos</div>
+            </div>
+            <div class="stat-card info">
+                <div class="stat-value" id="completed-sales">0</div>
+                <div class="stat-label">Completados</div>
+            </div>
+        </div>
+        
+        <!-- Content Panels -->
+        <div class="content-panels">
+            <!-- Main Panel -->
+            <div class="panel">
+                <div class="tabs">
+                    <button class="tab active" onclick="switchTab(event, 'conversations')">
+                        <i class="fas fa-comments"></i> Conversas
+                    </button>
+                    <button class="tab" onclick="switchTab(event, 'events')">
+                        <i class="fas fa-list"></i> Eventos (24h)
+                    </button>
+                </div>
+                
+                <div id="tab-content">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        Carregando...
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Side Panel -->
+            <div class="panel">
+                <h3>
+                    <i class="fas fa-address-book"></i>
+                    Contatos por Instância
+                </h3>
+                
+                <div id="contacts-section">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        Carregando contatos...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentTab = 'conversations';
+        let systemData = {};
+
+        // Atualizar relógio
+        function updateClock() {
+            const now = new Date();
+            const brazilTime = now.toLocaleString('pt-BR', { 
+                timeZone: 'America/Bahia',
+                day: '2-digit',
+                month: '2-digit', 
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+            document.getElementById('current-time').textContent = brazilTime;
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+
+        // Alternar abas
+        function switchTab(event, tab) {
+            currentTab = tab;
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+            loadTabContent();
+        }
+
+        // Carregar conteúdo da aba
+        async function loadTabContent() {
+            const content = document.getElementById('tab-content');
+            content.innerHTML = '<div class="loading"><div class="spinner"></div>Carregando...</div>';
+            
+            switch(currentTab) {
+                case 'conversations':
+                    await loadConversations();
+                    break;
+                case 'events':
+                    await loadEvents();
+                    break;
+            }
+        }
+
+        // Carregar conversas
+        async function loadConversations() {
+            try {
+                const response = await fetch('/status');
+                const data = await response.json();
+                const content = document.getElementById('tab-content');
+                
+                if (!data.conversations || data.conversations.length === 0) {
+                    content.innerHTML = `
+                        <div class="empty-state">
+                            <i class="fas fa-comments"></i>
+                            <h3>Nenhuma conversa ativa</h3>
+                            <p>As conversas aparecerão aqui quando iniciadas</p>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                let html = '<div class="table-container"><table>';
+                html += '<thead><tr>';
+                html += '<th>Cliente</th><th>Telefone</th><th>Pedido</th><th>Produto</th>';
+                html += '<th>Status</th><th>Respostas</th><th>Instância</th><th>Última Atividade</th>';
+                html += '</tr></thead><tbody>';
+                
+                data.conversations.forEach(conv => {
+                    const statusClass = conv.status === 'approved' ? 'success' : 
+                                       conv.status === 'completed' ? 'info' :
+                                       conv.status === 'convertido' ? 'success' : 
+                                       conv.status === 'timeout' ? 'danger' : 'warning';
+                    
+                    html += '<tr>';
+                    html += `<td>${conv.clientName ? conv.clientName.split(' ')[0] : 'Cliente'}</td>`;
+                    html += `<td>${conv.phone}</td>`;
+                    html += `<td><strong>${conv.orderCode}</strong></td>`;
+                    html += `<td><span class="badge badge-info">${conv.product}</span></td>`;
+                    html += `<td><span class="badge badge-${statusClass}">${conv.status}</span></td>`;
+                    html += `<td>${conv.responseCount}/3</td>`;
+                    html += `<td><span class="badge badge-warning">${conv.instance}</span></td>`;
+                    html += `<td>${conv.last_activity_brazil || conv.created_at_brazil}</td>`;
+                    html += '</tr>';
+                });
+                
+                html += '</tbody></table></div>';
+                content.innerHTML = html;
+                
+            } catch (error) {
+                console.error('Erro ao carregar conversas:', error);
+                document.getElementById('tab-content').innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        Erro ao carregar conversas: ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        // Carregar eventos
+        async function loadEvents() {
+            try {
+                const response = await fetch('/events?limit=50');
+                const data = await response.json();
+                const content = document.getElementById('tab-content');
+                
+                if (!data.events || data.events.length === 0) {
+                    content.innerHTML = `
+                        <div class="empty-state">
+                            <i class="fas fa-list"></i>
+                            <h3>Nenhum evento nas últimas 24h</h3>
+                            <p>Os eventos aparecerão aqui quando ocorrerem</p>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                let html = '<div class="table-container"><table>';
+                html += '<thead><tr>';
+                html += '<th>Data/Hora</th><th>Tipo</th><th>Cliente</th><th>Pedido</th>';
+                html += '<th>Produto</th><th>Instância</th><th>Respostas</th>';
+                html += '</tr></thead><tbody>';
+                
+                data.events.forEach(event => {
+                    const typeClass = event.type === 'venda_aprovada' ? 'success' :
+                                     event.type === 'convertido' ? 'success' :
+                                     event.type === 'pix_timeout' ? 'danger' : 'info';
+                    
+                    html += '<tr>';
+                    html += `<td>${event.date} ${event.time}</td>`;
+                    html += `<td><span class="badge badge-${typeClass}">${formatEventType(event.type)}</span></td>`;
+                    html += `<td>${event.clientName}</td>`;
+                    html += `<td>${event.orderCode}</td>`;
+                    html += `<td><span class="badge badge-info">${event.product}</span></td>`;
+                    html += `<td>${event.instance}</td>`;
+                    html += `<td>${event.responses}/3</td>`;
+                    html += '</tr>';
+                });
+                
+                html += '</tbody></table></div>';
+                content.innerHTML = html;
+                
+            } catch (error) {
+                console.error('Erro ao carregar eventos:', error);
+                document.getElementById('tab-content').innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        Erro ao carregar eventos: ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        // Carregar contatos
+        async function loadContacts() {
+            try {
+                const response = await fetch('/contacts/stats');
+                const data = await response.json();
+                const section = document.getElementById('contacts-section');
+                
+                if (!data.by_instance || data.by_instance.length === 0) {
+                    section.innerHTML = `
+                        <div class="empty-state">
+                            <i class="fas fa-address-book"></i>
+                            <h4>Nenhum contato</h4>
+                            <p>Contatos aparecem após primeira resposta</p>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                let html = `
+                    <div style="text-align: center; margin-bottom: 15px;">
+                        <div style="font-size: 1.5rem; font-weight: bold; color: #667eea;">
+                            ${data.total_contacts}
+                        </div>
+                        <div style="color: #666; font-size: 0.9rem;">Total de Contatos</div>
+                    </div>
+                    <div class="contacts-grid">
+                `;
+                
+                data.by_instance.forEach(instance => {
+                    html += `
+                        <div class="contact-instance">
+                            <div class="contact-count">${instance.total}</div>
+                            <div class="contact-name">${instance.instance}</div>
+                            <button class="btn" style="font-size: 0.7rem; padding: 5px 10px;" 
+                                    onclick="exportInstanceContacts('${instance.instance}')">
+                                <i class="fas fa-download"></i> Exportar
+                            </button>
+                        </div>
+                    `;
+                });
+                
+                html += '</div>';
+                section.innerHTML = html;
+                
+            } catch (error) {
+                console.error('Erro ao carregar contatos:', error);
+                document.getElementById('contacts-section').innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        Erro ao carregar contatos
+                    </div>
+                `;
+            }
+        }
+
+        // Atualizar dados
+        async function refreshData() {
+            try {
+                showAlert('Atualizando dados...', 'info');
+                
+                const response = await fetch('/status');
+                const data = await response.json();
+                systemData = data;
+                
+                // Atualizar cards
+                document.getElementById('active-conversations').textContent = data.stats.active_conversations;
+                document.getElementById('pending-pix').textContent = data.stats.pending_pix;
+                document.getElementById('contacts-saved').textContent = data.stats.contacts_saved;
+                document.getElementById('success-rate').textContent = data.stats.success_rate;
+                document.getElementById('converted-sales').textContent = data.stats.converted_sales;
+                document.getElementById('completed-sales').textContent = data.stats.completed_sales;
+                
+                // Atualizar informações
+                document.getElementById('n8n-url').textContent = data.config.n8n_webhook_url.substring(0, 50) + '...';
+                document.getElementById('database-status').textContent = 'PostgreSQL (Conectado)';
+                document.getElementById('uptime').textContent = Math.floor(data.uptime / 60) + ' min';
+                
+                // Recarregar conteúdo
+                await loadTabContent();
+                await loadContacts();
+                
+                showAlert('Dados atualizados!', 'success');
+                
+            } catch (error) {
+                console.error('Erro ao atualizar:', error);
+                showAlert('Erro ao atualizar dados', 'danger');
+            }
+        }
+
+        // Funções de exportação
+        function exportAllContacts() {
+            window.open('/contacts/export/all', '_blank');
+            showAlert('Download iniciado!', 'success');
+        }
+
+        function exportInstanceContacts(instance) {
+            window.open(`/contacts/export/${instance}`, '_blank');
+            showAlert(`Download da ${instance} iniciado!`, 'success');
+        }
+
+        // Health check
+        function openHealthCheck() {
+            window.open('/health', '_blank');
+        }
+
+        // Testar N8N
+        async function testN8N() {
+            try {
+                showAlert('Testando N8N...', 'info');
+                
+                const testData = {
+                    event_type: 'system_test',
+                    produto: 'TEST',
+                    instancia: 'SYSTEM',
+                    cliente: { nome: 'Teste', telefone: '5511999999999' },
+                    teste: true,
+                    timestamp: new Date().toISOString()
+                };
+                
+                const response = await fetch('/webhook/n8n-confirm', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(testData)
+                });
+                
+                if (response.ok) {
+                    showAlert('N8N respondendo corretamente!', 'success');
+                } else {
+                    showAlert('N8N retornou erro', 'warning');
+                }
+                
+            } catch (error) {
+                showAlert('Erro ao testar N8N', 'danger');
+            }
+        }
+
+        // Utilitários
+        function formatEventType(type) {
+            const types = {
+                'pix_gerado': 'PIX Gerado',
+                'venda_aprovada': 'Venda Aprovada', 
+                'pix_timeout': 'PIX Timeout',
+                'convertido': 'Convertido',
+                'evento': 'Evento'
+            };
+            return types[type] || type;
+        }
+
+        function showAlert(message, type = 'info') {
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert alert-${type}`;
+            alertDiv.innerHTML = `
+                <i class="fas fa-${type === 'success' ? 'check-circle' : 
+                                  type === 'danger' ? 'exclamation-triangle' : 'info-circle'}"></i>
+                ${message}
+            `;
+            alertDiv.style.position = 'fixed';
+            alertDiv.style.top = '20px';
+            alertDiv.style.right = '20px';
+            alertDiv.style.zIndex = '9999';
+            alertDiv.style.maxWidth = '300px';
+            
+            document.body.appendChild(alertDiv);
+            
+            setTimeout(() => {
+                alertDiv.remove();
+            }, 3000);
+        }
+
+        // Inicialização
+        document.addEventListener('DOMContentLoaded', async function() {
+            await refreshData();
+            
+            // Auto-refresh a cada 30 segundos
+            setInterval(refreshData, 30000);
+        });
+    </script>
+</body>
+</html>
