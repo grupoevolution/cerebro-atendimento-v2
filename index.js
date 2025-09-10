@@ -2,11 +2,9 @@
  * CÉREBRO DE ATENDIMENTO v2.0 - SISTEMA COMPLETO E SIMPLIFICADO
  * Sistema híbrido: Performance + Simplicidade + Funcionalidades essenciais
  * 
- * ✅ Baseado no projeto v1 que funcionava
- * ✅ Melhorias do v3.2 que fazem sentido
- * ✅ Sistema de contatos automático
- * ✅ Horário Brasília/Bahia correto
- * ✅ Dashboard simples e funcional
+ * ✅ CORREÇÃO: Sistema aguarda funil completo antes de processar próxima resposta
+ * ✅ Suporte para funis com múltiplas mensagens e delays
+ * ✅ Controle por funil_completo do N8N
  */
 
 require('dotenv').config();
@@ -164,6 +162,7 @@ function normalizePhoneNumber(phone) {
     console.log(`⚠️ Formato não reconhecido: ${phone} → ${cleaned}`);
     return cleaned;
 }
+
 // Extrair primeiro nome
 function getFirstName(fullName) {
     return fullName ? fullName.split(' ')[0].trim() : 'Cliente';
@@ -408,6 +407,278 @@ app.post('/webhook/perfect', async (req, res) => {
 });
 
 /**
+ * ENVIAR EVENTO DE CONVERSÃO
+ */
+async function sendConversionEvent(conversation, messageContent) {
+    try {
+        const firstName = getFirstName(conversation.clientName);
+        
+        console.log(`🎯 Enviando evento convertido: ${conversation.orderCode}`);
+        
+        const eventData = {
+            event_type: 'convertido',
+            produto: conversation.product,
+            instancia: conversation.instance,
+            evento_origem: 'pix_convertido',
+            cliente: {
+                telefone: conversation.phone,
+                nome: firstName,
+                nome_completo: conversation.clientName
+            },
+            conversao: {
+                resposta_numero: conversation.responseCount + 1,
+                conteudo_resposta: messageContent,
+                valor_original: conversation.amount,
+                timestamp: new Date().toISOString(),
+                brazil_time: getBrazilTime()
+            },
+            pedido: {
+                codigo: conversation.orderCode,
+                valor: conversation.amount,
+                pix_url: conversation.pixUrl || ''
+            },
+            timestamp: new Date().toISOString(),
+            brazil_time: getBrazilTime(),
+            conversation_id: conversation.id
+        };
+        
+        const success = await sendToN8N(eventData, 'convertido');
+        
+        if (success) {
+            console.log(`✅ Evento convertido enviado: ${conversation.orderCode}`);
+        }
+        
+        return success;
+        
+    } catch (error) {
+        console.error(`❌ Erro evento conversão: ${error.message}`);
+        return false;
+    }
+}
+
+/**
+ * VERIFICAR STATUS DE PAGAMENTO
+ */
+async function checkPaymentStatus(orderCode) {
+    try {
+        // Verificar na memória primeiro
+        for (const [phone, conv] of conversations) {
+            if (conv.orderCode === orderCode) {
+                return conv.status === 'approved' || conv.status === 'completed';
+            }
+        }
+        
+        // Verificar no banco
+        try {
+            const result = await database.query(
+                'SELECT status FROM conversations WHERE order_code = $1 ORDER BY updated_at DESC LIMIT 1',
+                [orderCode]
+            );
+            
+            if (result.rows.length > 0) {
+                const status = result.rows[0].status;
+                return status === 'approved' || status === 'completed';
+            }
+        } catch (dbError) {
+            console.warn(`⚠️ Erro verificar pagamento: ${dbError.message}`);
+        }
+        
+        return false;
+        
+    } catch (error) {
+        console.error(`❌ Erro verificar pagamento: ${error.message}`);
+        return false;
+    }
+}
+
+/**
+ * ENDPOINTS PARA N8N
+ */
+
+// Verificar pagamento
+app.get('/check-payment/:orderId', async (req, res) => {
+    try {
+        const { orderId } = req.params;
+        
+        console.log(`💳 Check payment: ${orderId}`);
+        
+        const isPaid = await checkPaymentStatus(orderId);
+        
+        res.json({ 
+            status: isPaid ? 'paid' : 'pending',
+            order_id: orderId
+        });
+        
+    } catch (error) {
+        console.error(`❌ Erro check payment: ${error.message}`);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Marcar como completo
+app.post('/webhook/complete/:orderId', async (req, res) => {
+    try {
+        const { orderId } = req.params;
+        
+        console.log(`✅ Marcando completo: ${orderId}`);
+        
+        // Buscar e atualizar conversa
+        for (const [phone, conv] of conversations) {
+            if (conv.orderCode === orderId) {
+                conv.status = 'completed';
+                conv.lastActivity = new Date();
+                conversations.set(phone, conv);
+                break;
+            }
+        }
+        
+        // Atualizar banco (async)
+        try {
+            await database.query(
+                'UPDATE conversations SET status = $1, updated_at = NOW() WHERE order_code = $2',
+                ['completed', orderId]
+            );
+        } catch (dbError) {
+            console.warn(`⚠️ Erro no banco (complete): ${dbError.message}`);
+        }
+        
+        res.json({ 
+            success: true, 
+            message: 'Fluxo marcado como completo',
+            order_id: orderId
+        });
+        
+    } catch (error) {
+        console.error(`❌ Erro marcar completo: ${error.message}`);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+/**
+ * ENDPOINTS DE CONTATOS
+ */
+
+// Estatísticas de contatos
+app.get('/contacts/stats', async (req, res) => {
+    try {
+        const stats = await database.query(`
+            SELECT 
+                instance,
+                COUNT(*) as total,
+                COUNT(*) FILTER (WHERE saved_at >= NOW() - INTERVAL '24 hours') as today,
+                COUNT(*) FILTER (WHERE saved_at >= NOW() - INTERVAL '7 days') as this_week,
+                MIN(saved_at) as first_contact,
+                MAX(saved_at) as last_contact
+            FROM contacts 
+            GROUP BY instance 
+            ORDER BY total DESC
+        `);
+        
+        const totalContacts = await database.query('SELECT COUNT(*) as total FROM contacts');
+        
+        res.json({
+            total_contacts: parseInt(totalContacts.rows[0].total),
+            by_instance: stats.rows.map(row => ({
+                instance: row.instance,
+                total: parseInt(row.total),
+                today: parseInt(row.today),
+                this_week: parseInt(row.this_week),
+                first_contact: row.first_contact,
+                last_contact: row.last_contact
+            }))
+        });
+        
+    } catch (error) {
+        console.error(`❌ Erro stats contatos: ${error.message}`);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Exportar contatos por instância
+app.get('/contacts/export/:instance', async (req, res) => {
+    try {
+        const { instance } = req.params;
+        
+        console.log(`📥 Exportando contatos: ${instance}`);
+        
+        const contacts = await database.query(`
+            SELECT phone, name, saved_at, product
+            FROM contacts 
+            WHERE instance = $1 
+            ORDER BY saved_at DESC
+        `, [instance.toUpperCase()]);
+        
+        if (contacts.rows.length === 0) {
+            return res.status(404).json({ 
+                success: false, 
+                message: `Nenhum contato encontrado para ${instance}` 
+            });
+        }
+        
+        // CSV formato Google Contacts
+        let csv = 'Name,Phone 1 - Value,Notes\n';
+        
+        contacts.rows.forEach(contact => {
+            const date = getBrazilTime('DD/MM/YYYY HH:mm');
+            const notes = `Instância: ${instance} | Produto: ${contact.product} | Salvo: ${date}`;
+            csv += `"${contact.name}","${contact.phone}","${notes}"\n`;
+        });
+        
+        const filename = `contatos_${instance.toLowerCase()}_${getBrazilTime('YYYY-MM-DD')}.csv`;
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.send(csv);
+        
+        console.log(`✅ ${contacts.rows.length} contatos exportados: ${instance}`);
+        
+    } catch (error) {
+        console.error(`❌ Erro exportar contatos: ${error.message}`);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Exportar todos os contatos
+app.get('/contacts/export/all', async (req, res) => {
+    try {
+        console.log('📥 Exportando TODOS os contatos...');
+        
+        const contacts = await database.query(`
+            SELECT phone, name, instance, saved_at, product
+            FROM contacts 
+            ORDER BY instance, saved_at DESC
+        `);
+        
+        if (contacts.rows.length === 0) {
+            return res.status(404).json({ 
+                success: false, 
+                message: 'Nenhum contato encontrado' 
+            });
+        }
+        
+        // CSV com instância no nome
+        let csv = 'Name,Phone 1 - Value,Notes\n';
+        
+        contacts.rows.forEach(contact => {
+            const date = getBrazilTime('DD/MM/YYYY HH:mm');
+            const name = `${contact.name} - ${contact.instance}`;
+            const notes = `Produto: ${contact.product} | Salvo: ${date}`;
+            csv += `"${name}","${contact.phone}","${notes}"\n`;
+        });
+        
+        const filename = `todos_contatos_${getBrazilTime('YYYY-MM-DD')}.csv`;
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.send(csv);
+        
+        console.log(`✅ ${contacts.rows.length} contatos exportados (todos)`);
+        
+    } catch (error) {
+        console.error(`❌ Erro exportar todos: ${error.message}`);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+/**
  * PROCESSAR VENDA APROVADA
  */
 async function handleApprovedSale(orderCode, phoneNumber, firstName, fullName, product, amount, originalData) {
@@ -437,7 +708,10 @@ async function handleApprovedSale(orderCode, phoneNumber, firstName, fullName, p
             lastActivity: new Date(),
             responseCount: 0,
             pixUrl: '',
-            id: Date.now() // ID temporário
+            id: Date.now(),
+            waitingConfirmation: false,
+            pendingStep: null,
+            funilInProgress: false // NOVO: indica se funil está em progresso
         };
         
         conversations.set(phoneNumber, conversation);
@@ -518,7 +792,10 @@ async function handlePendingPix(orderCode, phoneNumber, firstName, fullName, pro
             lastActivity: new Date(),
             responseCount: 0,
             pixUrl: pixUrl,
-            id: Date.now() // ID temporário
+            id: Date.now(),
+            waitingConfirmation: false,
+            pendingStep: null,
+            funilInProgress: false // NOVO: indica se funil está em progresso
         };
         
         conversations.set(phoneNumber, conversation);
@@ -683,7 +960,7 @@ async function handleSystemMessage(clientNumber, messageContent, instanceName) {
 
 /**
  * PROCESSAR RESPOSTA DO CLIENTE - VERSÃO CORRIGIDA
- * Aguarda confirmação do N8N antes de processar próxima resposta
+ * Aguarda confirmação COMPLETA do N8N antes de processar próxima resposta
  */
 async function handleClientResponse(clientNumber, messageContent, instanceName, messageData) {
     try {
@@ -697,7 +974,13 @@ async function handleClientResponse(clientNumber, messageContent, instanceName, 
             return;
         }
         
-        // NOVA VERIFICAÇÃO: Se está aguardando confirmação do N8N, ignorar
+        // VERIFICAÇÃO 1: Se o funil está em progresso, ignorar mensagem
+        if (conversation.funilInProgress) {
+            console.log(`🚧 Cliente ${clientNumber} - funil em progresso - ignorando mensagem`);
+            return;
+        }
+        
+        // VERIFICAÇÃO 2: Se está aguardando confirmação do N8N, ignorar
         if (conversation.waitingConfirmation) {
             console.log(`⏳ Cliente ${clientNumber} aguardando confirmação N8N - ignorando mensagem`);
             return;
@@ -751,13 +1034,14 @@ async function handleClientResponse(clientNumber, messageContent, instanceName, 
             }
         }
         
-        // MARCAR COMO AGUARDANDO CONFIRMAÇÃO
+        // MARCAR COMO AGUARDANDO CONFIRMAÇÃO E FUNIL EM PROGRESSO
         conversation.waitingConfirmation = true;
+        conversation.funilInProgress = true; // NOVO: marcar funil em progresso
         conversation.pendingStep = nextStep;
         conversation.lastActivity = new Date();
         conversations.set(clientNumber, conversation);
         
-        console.log(`⏳ Cliente ${clientNumber} marcado como aguardando confirmação N8N`);
+         console.log(`⏳ Cliente ${clientNumber} marcado como aguardando confirmação N8N e funil em progresso`);
         
         // Preparar dados para N8N
         const firstName = getFirstName(conversation.clientName);
@@ -791,12 +1075,13 @@ async function handleClientResponse(clientNumber, messageContent, instanceName, 
         const success = await sendToN8N(eventData, `resposta_0${nextStep}`);
         
         if (success) {
-            console.log(`✅ Resposta_0${nextStep} enviada para N8N - aguardando confirmação`);
+            console.log(`✅ Resposta_0${nextStep} enviada para N8N - aguardando funil completo`);
         } else {
             console.error(`❌ Falha ao enviar resposta_0${nextStep} - liberando conversa`);
             
             // Se falhou, liberar a conversa para não travar
             conversation.waitingConfirmation = false;
+            conversation.funilInProgress = false;
             conversation.pendingStep = null;
             conversations.set(clientNumber, conversation);
         }
@@ -807,8 +1092,8 @@ async function handleClientResponse(clientNumber, messageContent, instanceName, 
 }
 
 /**
- * WEBHOOK N8N CONFIRM - VERSÃO CORRIGIDA
- * Processa confirmação e libera para próxima resposta
+ * WEBHOOK N8N CONFIRM - VERSÃO CORRIGIDA COM CONTROLE DE FUNIL COMPLETO
+ * Só libera para próxima resposta quando funil_completo = true
  */
 app.post('/webhook/n8n-confirm', async (req, res) => {
     try {
@@ -816,7 +1101,7 @@ app.post('/webhook/n8n-confirm', async (req, res) => {
         
         const phoneNormalized = normalizePhoneNumber(telefone);
         
-        console.log(`✅ N8N confirmou: ${tipo_mensagem} para ${phoneNormalized} via ${instancia}`);
+        console.log(`📨 N8N confirmação recebida: ${tipo_mensagem} | ${phoneNormalized} | Funil completo: ${funil_completo}`);
         
         // Buscar conversa
         const conversation = conversations.get(phoneNormalized);
@@ -829,57 +1114,70 @@ app.post('/webhook/n8n-confirm', async (req, res) => {
             });
         }
         
-        // Se está aguardando confirmação, processar
-        if (conversation.waitingConfirmation && conversation.pendingStep) {
-            const stepCompleted = conversation.pendingStep;
+        // IMPORTANTE: Só processar se funil_completo = true
+        if (funil_completo === true || funil_completo === 'true') {
+            console.log(`✅ Funil COMPLETO confirmado para ${phoneNormalized}`);
             
-            // Atualizar responseCount
-            conversation.responseCount = stepCompleted;
-            conversation.waitingConfirmation = false;
-            conversation.pendingStep = null;
-            conversation.lastActivity = new Date();
-            
-            // Atualizar banco (async)
-            try {
-                await database.query(
-                    'UPDATE conversations SET responses_count = $1, last_response_at = NOW(), updated_at = NOW() WHERE order_code = $2',
-                    [stepCompleted, conversation.orderCode]
-                );
-            } catch (dbError) {
-                console.warn(`⚠️ Erro no banco (confirmação): ${dbError.message}`);
-            }
-            
-            // Se foi a terceira resposta, marcar como completo
-            if (stepCompleted === 3) {
-                conversation.status = 'completed';
+            if (conversation.waitingConfirmation && conversation.pendingStep) {
+                const stepCompleted = conversation.pendingStep;
                 
+                // Atualizar responseCount
+                conversation.responseCount = stepCompleted;
+                conversation.waitingConfirmation = false;
+                conversation.funilInProgress = false; // IMPORTANTE: liberar funil
+                conversation.pendingStep = null;
+                conversation.lastActivity = new Date();
+                
+                // Atualizar banco (async)
                 try {
                     await database.query(
-                        'UPDATE conversations SET status = $1, updated_at = NOW() WHERE order_code = $2',
-                        ['completed', conversation.orderCode]
+                        'UPDATE conversations SET responses_count = $1, last_response_at = NOW(), updated_at = NOW() WHERE order_code = $2',
+                        [stepCompleted, conversation.orderCode]
                     );
                 } catch (dbError) {
-                    console.warn(`⚠️ Erro no banco (completo): ${dbError.message}`);
+                    console.warn(`⚠️ Erro no banco (confirmação): ${dbError.message}`);
                 }
                 
-                console.log(`🎯 Funil completo: ${conversation.orderCode}`);
+                // Se foi a terceira resposta, marcar como completo
+                if (stepCompleted === 3) {
+                    conversation.status = 'completed';
+                    
+                    try {
+                        await database.query(
+                            'UPDATE conversations SET status = $1, updated_at = NOW() WHERE order_code = $2',
+                            ['completed', conversation.orderCode]
+                        );
+                    } catch (dbError) {
+                        console.warn(`⚠️ Erro no banco (completo): ${dbError.message}`);
+                    }
+                    
+                    console.log(`🎯 Todos os funis completos: ${conversation.orderCode}`);
+                }
+                
+                conversations.set(phoneNormalized, conversation);
+                
+                console.log(`🔓 Cliente ${phoneNormalized} LIBERADO - resposta_0${stepCompleted} e funil completos`);
+                console.log(`📊 Status: Respostas ${conversation.responseCount}/3 | Próxima mensagem habilitada`);
             }
+        } else {
+            // Funil ainda em progresso (primeira mensagem enviada, mas ainda tem delays)
+            console.log(`⏳ Funil EM PROGRESSO para ${phoneNormalized} - aguardando conclusão`);
             
+            // Manter flags de bloqueio
+            conversation.lastActivity = new Date();
             conversations.set(phoneNormalized, conversation);
-            
-            console.log(`🔓 Cliente ${phoneNormalized} liberado - resposta_0${stepCompleted} confirmada`);
         }
-        
-        console.log(`📝 Confirmação N8N registrada: ${conversation.orderCode}`);
         
         res.json({ 
             success: true,
-            message: `${tipo_mensagem} confirmada`,
+            message: funil_completo ? 'Funil completo confirmado' : 'Confirmação parcial recebida',
+            funil_completo: funil_completo,
             pedido: conversation.orderCode,
             cliente: conversation.clientName,
             respostas_atuais: conversation.responseCount,
             status_conversa: conversation.status,
-            liberado_para_proxima: !conversation.waitingConfirmation
+            liberado_para_proxima: !conversation.funilInProgress && !conversation.waitingConfirmation,
+            em_progresso: conversation.funilInProgress
         });
         
     } catch (error) {
@@ -937,6 +1235,7 @@ async function sendConversionEvent(conversation, messageContent) {
         return false;
     }
 }
+
 /**
  * VERIFICAR STATUS DE PAGAMENTO
  */
@@ -971,6 +1270,7 @@ async function checkPaymentStatus(orderCode) {
         return false;
     }
 }
+
 /**
  * ENDPOINTS PARA N8N
  */
@@ -1240,7 +1540,8 @@ app.get('/status', async (req, res) => {
                 'Contatos automáticos funcionando', 
                 'Timezone Bahia correto',
                 'Fluxo resposta_01, resposta_02, resposta_03',
-                'PIX → timeout → convertido funcionando'
+                'PIX → timeout → convertido funcionando',
+                'CORREÇÃO: Aguarda funil completo antes de processar próxima resposta'
             ]
         });
         
@@ -1311,6 +1612,7 @@ app.get('/health', (req, res) => {
     });
 });
 
+// CONTINUAÇÃO DO CÓDIGO - PARTE 3
 // Dashboard HTML embutido (caso arquivo não exista)
 function getDashboardHTML() {
     return `<!DOCTYPE html>
@@ -1498,6 +1800,7 @@ initializeSystem().then(() => {
         console.log(`   ✅ Fluxo resposta_01 → resposta_02 → resposta_03`);
         console.log(`   ✅ PIX timeout → convertido funcionando`);
         console.log(`   ✅ Exportação Google Contacts`);
+        console.log(`   ✅ CORREÇÃO: Aguarda funil completo antes de processar próxima resposta`);
     });
 });
 
