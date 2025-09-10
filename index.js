@@ -937,50 +937,40 @@ async function sendConversionEvent(conversation, messageContent) {
         return false;
     }
 }
-
 /**
- * WEBHOOK N8N CONFIRM
+ * VERIFICAR STATUS DE PAGAMENTO
  */
-app.post('/webhook/n8n-confirm', async (req, res) => {
+async function checkPaymentStatus(orderCode) {
     try {
-        const { tipo_mensagem, telefone, instancia } = req.body;
-        
-        const phoneNormalized = normalizePhoneNumber(telefone);
-        
-        console.log(`✅ N8N confirmou: ${tipo_mensagem} para ${phoneNormalized} via ${instancia}`);
-        
-        // Buscar conversa
-        const conversation = conversations.get(phoneNormalized);
-        
-        if (!conversation) {
-            console.warn(`⚠️ Conversa não encontrada para confirmação: ${phoneNormalized}`);
-            return res.json({ 
-                success: false, 
-                message: 'Conversa não encontrada'
-            });
+        // Verificar na memória primeiro
+        for (const [phone, conv] of conversations) {
+            if (conv.orderCode === orderCode) {
+                return conv.status === 'approved' || conv.status === 'completed';
+            }
         }
         
-        // Atualizar atividade
-        conversation.lastActivity = new Date();
-        conversations.set(phoneNormalized, conversation);
+        // Verificar no banco
+        try {
+            const result = await database.query(
+                'SELECT status FROM conversations WHERE order_code = $1 ORDER BY updated_at DESC LIMIT 1',
+                [orderCode]
+            );
+            
+            if (result.rows.length > 0) {
+                const status = result.rows[0].status;
+                return status === 'approved' || status === 'completed';
+            }
+        } catch (dbError) {
+            console.warn(`⚠️ Erro verificar pagamento: ${dbError.message}`);
+        }
         
-        console.log(`📝 Confirmação N8N registrada: ${conversation.orderCode}`);
-        
-        res.json({ 
-            success: true,
-            message: `${tipo_mensagem} confirmada`,
-            pedido: conversation.orderCode,
-            cliente: conversation.clientName,
-            respostas_atuais: conversation.responseCount,
-            status_conversa: conversation.status
-        });
+        return false;
         
     } catch (error) {
-        console.error(`❌ Erro N8N confirm: ${error.message}`);
-        res.status(500).json({ success: false, error: error.message });
+        console.error(`❌ Erro verificar pagamento: ${error.message}`);
+        return false;
     }
-});
-
+}
 /**
  * ENDPOINTS PARA N8N
  */
