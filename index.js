@@ -1092,7 +1092,7 @@ async function handleClientResponse(clientNumber, messageContent, instanceName, 
 }
 
 /**
- * WEBHOOK N8N CONFIRM - VERSÃO CORRIGIDA COM CONTROLE DE FUNIL COMPLETO
+ * WEBHOOK N8N CONFIRM - VERSÃO CORRIGIDA COM DEBUG
  * Só libera para próxima resposta quando funil_completo = true
  */
 app.post('/webhook/n8n-confirm', async (req, res) => {
@@ -1102,31 +1102,73 @@ app.post('/webhook/n8n-confirm', async (req, res) => {
         const phoneNormalized = normalizePhoneNumber(telefone);
         
         console.log(`📨 N8N confirmação recebida: ${tipo_mensagem} | ${phoneNormalized} | Funil completo: ${funil_completo}`);
+        console.log(`📞 Telefone original: ${telefone} | Normalizado: ${phoneNormalized}`);
         
-        // Buscar conversa
-        const conversation = conversations.get(phoneNormalized);
+        // Buscar conversa - tentar com telefone normalizado primeiro
+        let conversation = conversations.get(phoneNormalized);
+        
+        // Se não encontrou, tentar com telefone original
+        if (!conversation) {
+            conversation = conversations.get(telefone);
+            console.log(`🔍 Tentando com telefone original: ${telefone}`);
+        }
+        
+        // Se ainda não encontrou, tentar percorrer todas as conversas
+        if (!conversation) {
+            console.log(`🔍 Buscando em todas as conversas...`);
+            for (const [phone, conv] of conversations) {
+                const normalizedStored = normalizePhoneNumber(phone);
+                if (normalizedStored === phoneNormalized || phone === telefone) {
+                    conversation = conv;
+                    console.log(`✅ Conversa encontrada com telefone: ${phone}`);
+                    
+                    // IMPORTANTE: Atualizar a conversa com a chave correta
+                    conversations.delete(phone);
+                    conversations.set(phoneNormalized, conversation);
+                    break;
+                }
+            }
+        }
         
         if (!conversation) {
             console.warn(`⚠️ Conversa não encontrada para confirmação: ${phoneNormalized}`);
             return res.json({ 
                 success: false, 
-                message: 'Conversa não encontrada'
+                message: 'Conversa não encontrada',
+                telefone_recebido: telefone,
+                telefone_normalizado: phoneNormalized
             });
         }
         
-        // IMPORTANTE: Só processar se funil_completo = true
-        if (funil_completo === true || funil_completo === 'true') {
+        // Debug do estado atual
+        console.log(`📊 Estado atual da conversa:`);
+        console.log(`   - waitingConfirmation: ${conversation.waitingConfirmation}`);
+        console.log(`   - funilInProgress: ${conversation.funilInProgress}`);
+        console.log(`   - pendingStep: ${conversation.pendingStep}`);
+        console.log(`   - responseCount: ${conversation.responseCount}`);
+        
+        // IMPORTANTE: Processar baseado em funil_completo
+        if (funil_completo === true || funil_completo === 'true' || funil_completo === "true") {
             console.log(`✅ Funil COMPLETO confirmado para ${phoneNormalized}`);
             
-            if (conversation.waitingConfirmation && conversation.pendingStep) {
+            // Verificar se há step pendente
+            if (conversation.pendingStep) {
                 const stepCompleted = conversation.pendingStep;
                 
                 // Atualizar responseCount
                 conversation.responseCount = stepCompleted;
+                
+                // LIMPAR TODAS AS FLAGS - IMPORTANTE!
                 conversation.waitingConfirmation = false;
-                conversation.funilInProgress = false; // IMPORTANTE: liberar funil
+                conversation.funilInProgress = false;
                 conversation.pendingStep = null;
                 conversation.lastActivity = new Date();
+                
+                console.log(`🔓 FLAGS LIMPAS - Cliente ${phoneNormalized} LIBERADO`);
+                console.log(`   - responseCount atualizado para: ${stepCompleted}`);
+                console.log(`   - waitingConfirmation: false`);
+                console.log(`   - funilInProgress: false`);
+                console.log(`   - pendingStep: null`);
                 
                 // Atualizar banco (async)
                 try {
@@ -1153,15 +1195,24 @@ app.post('/webhook/n8n-confirm', async (req, res) => {
                     
                     console.log(`🎯 Todos os funis completos: ${conversation.orderCode}`);
                 }
-                
-                conversations.set(phoneNormalized, conversation);
-                
-                console.log(`🔓 Cliente ${phoneNormalized} LIBERADO - resposta_0${stepCompleted} e funil completos`);
-                console.log(`📊 Status: Respostas ${conversation.responseCount}/3 | Próxima mensagem habilitada`);
+            } else {
+                // Mesmo sem pendingStep, limpar as flags se estavam travadas
+                console.log(`⚠️ Sem pendingStep, mas limpando flags de segurança`);
+                conversation.waitingConfirmation = false;
+                conversation.funilInProgress = false;
+                conversation.lastActivity = new Date();
             }
+            
+            // Salvar conversa atualizada
+            conversations.set(phoneNormalized, conversation);
+            
+            console.log(`✅ Cliente ${phoneNormalized} está LIBERADO para próxima resposta`);
+            console.log(`📊 Status final: Respostas ${conversation.responseCount}/3`);
+            
         } else {
-            // Funil ainda em progresso (primeira mensagem enviada, mas ainda tem delays)
+            // Funil ainda em progresso
             console.log(`⏳ Funil EM PROGRESSO para ${phoneNormalized} - aguardando conclusão`);
+            console.log(`   - Valor de funil_completo: ${funil_completo} (tipo: ${typeof funil_completo})`);
             
             // Manter flags de bloqueio
             conversation.lastActivity = new Date();
@@ -1174,10 +1225,15 @@ app.post('/webhook/n8n-confirm', async (req, res) => {
             funil_completo: funil_completo,
             pedido: conversation.orderCode,
             cliente: conversation.clientName,
+            telefone_normalizado: phoneNormalized,
             respostas_atuais: conversation.responseCount,
             status_conversa: conversation.status,
             liberado_para_proxima: !conversation.funilInProgress && !conversation.waitingConfirmation,
-            em_progresso: conversation.funilInProgress
+            flags: {
+                waitingConfirmation: conversation.waitingConfirmation,
+                funilInProgress: conversation.funilInProgress,
+                pendingStep: conversation.pendingStep
+            }
         });
         
     } catch (error) {
